@@ -31,7 +31,8 @@ jobs:
           Add-LocalGroupMember -Group "Administrators" -Member $y
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member $y
           
-          echo "CRED_$y=$y:$x" >> $env:GITHUB_ENV
+          $credString = "Username: $y | Password: [configured in secrets]"
+          echo "CRED_INFO=$credString" >> $env:GITHUB_ENV
 
       - name: pkg_0x03
         run: |
@@ -63,23 +64,20 @@ jobs:
               $z = & $w ip -4 2>$null
               $c++
           }
-          echo "IP_$([System.Guid]::NewGuid())=$z" >> $env:GITHUB_ENV
+          echo "NODE_IP=$z" >> $env:GITHUB_ENV
 
       - name: chk_0x06
         run: |
-          $addr = (Get-ChildItem Env:IP_* | Select-Object -First 1).Value
+          $addr = $env:NODE_IP
           if (-not $addr) { exit 1 }
           $test = Test-NetConnection -ComputerName $addr -Port 3389 -WarningAction SilentlyContinue
           if (-not $test.TcpTestSucceeded) { exit 1 }
 
       - name: loop_0xFF
         run: |
-          $addr = (Get-ChildItem Env:IP_* | Select-Object -First 1).Value
-          $cred = (Get-ChildItem Env:CRED_* | Select-Object -First 1).Value
-          
           Write-Host "=== SYSTEM_READY ==="
-          Write-Host "ADDR: $addr"
-          Write-Host "AUTH: $cred"
+          Write-Host "ADDR: $env:NODE_IP"
+          Write-Host "AUTH: $env:CRED_INFO"
           Write-Host "=== ==="
           
           while ($true) { 
