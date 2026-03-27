@@ -1,0 +1,21 @@
+name: 02 - Install 
+
+on:
+  workflow_dispatch:
+
+jobs:
+  install-mods:
+    runs-on: windows-latest
+    timeout-minutes: 368
+
+    steps:
+      - name: Install 
+        run: |
+          Set-ExecutionPolicy Bypass -Scope Process -Force
+          [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+          iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+          
+          $mods = @('python', 'notepadplusplus', 'vscode', '7zip', 'git')
+          foreach ($mod in $mods) {
+              choco install $mod -y --no-progress
+          }
