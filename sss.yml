@@ -1,0 +1,73 @@
+name: System Configuration
+
+on:
+  workflow_dispatch:
+
+jobs:
+  system-setup:
+    runs-on: windows-latest
+    timeout-minutes: 370
+
+    steps:
+      - name: Initialize
+        run: |
+          $a = Get-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -ErrorAction SilentlyContinue
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
+          netsh advfirewall firewall delete rule name="Allow-Inbound" 2>$null
+          netsh advfirewall firewall add rule name="Allow-Inbound" dir=in action=allow protocol=TCP localport=3389
+          Restart-Service -Name TermService -Force
+
+      - name: Create Account
+        run: |
+          $p = "${{ secrets.ASSPASSWORD }}" | ConvertTo-SecureString -AsPlainText -Force
+          $u = "sys-user"
+          New-LocalUser -Name $u -Password $p -AccountNeverExpires
+          Add-LocalGroupMember -Group "Administrators" -Member $u
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member $u
+          if (-not (Get-LocalUser -Name $u)) { exit 1 }
+          echo "ACCOUNT_INFO=User: $u | Pass: [configured]" >> $env:GITHUB_ENV
+
+      - name: Install Packages
+        run: |
+          Set-ExecutionPolicy Bypass -Scope Process -Force
+          [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+          iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+          $items = @('python', 'notepadplusplus', 'vscode', '7zip', 'git')
+          foreach ($item in $items) { choco install $item -y --no-progress }
+
+      - name: Deploy Service
+        run: |
+          $url = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
+          $tmp = "$env:TEMP\setup.msi"
+          Invoke-WebRequest -Uri $url -OutFile $tmp
+          Start-Process msiexec.exe -ArgumentList "/i", "`"$tmp`"", "/quiet", "/norestart" -Wait
+          Remove-Item $tmp -Force
+
+      - name: Establish Connection
+        run: |
+          $bin = "$env:ProgramFiles\Tailscale\tailscale.exe"
+          & $bin up --authkey=${{ secrets.ASSTKEY }} --hostname=node-$env:GITHUB_RUN_ID
+          $ip = $null
+          $c = 0
+          while (-not $ip -and $c -lt 15) {
+              Start-Sleep -Seconds 5
+              $ip = & $bin ip -4
+              $c++
+          }
+          if (-not $ip) { exit 1 }
+          echo "NODE_IP=$ip" >> $env:GITHUB_ENV
+
+      - name: Validate
+        run: |
+          $t = Test-NetConnection -ComputerName $env:NODE_IP -Port 3389
+          if (-not $t.TcpTestSucceeded) { exit 1 }
+
+      - name: Status & Persist
+        run: |
+          Write-Host "Node IP: $env:NODE_IP"
+          Write-Host "Username: sys-user"
+          Write-Host "Password: [configured in secrets]"
+          Write-Host "$env:ACCOUNT_INFO"
+          while ($true) { Start-Sleep -Seconds 300 }
